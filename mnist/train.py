@@ -17,6 +17,16 @@ from torchvision.datasets import MNIST
 from model import MVAE
 
 
+class binary_transform(nn.Module):
+    
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+    
+    def forward(self,x):
+        return torch.distributions.Bernoulli(x).sample()
+    
+
+
 def elbo_loss(recon_image, image, recon_text, text, mu, logvar,
               lambda_image=1.0, lambda_text=1.0, annealing_factor=1):
     """Bimodal ELBO loss function. 
@@ -50,6 +60,8 @@ def elbo_loss(recon_image, image, recon_text, text, mu, logvar,
 
     if recon_text is not None and text is not None:
         text_bce = torch.sum(cross_entropy(recon_text, text), dim=1)
+    # print(f'recon image : {recon_image.sum()}')
+    # print(f'recon_text : {recon_text.sum()}')
 
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
     # https://arxiv.org/abs/1312.6114
@@ -155,13 +167,16 @@ if __name__ == "__main__":
 
     if not os.path.isdir('./trained_models'):
         os.makedirs('./trained_models')
+        
 
     train_loader   = torch.utils.data.DataLoader(
-        MNIST('./data', train=True, download=True, transform=transforms.ToTensor()),
+        MNIST('./data', train=True, download=True, transform=transforms.Compose([transforms.ToTensor(),
+                                                                                 binary_transform()])),
         batch_size=args.batch_size, shuffle=True)
     N_mini_batches = len(train_loader)
     test_loader    = torch.utils.data.DataLoader(
-        MNIST('./data', train=False, download=True, transform=transforms.ToTensor()),
+        MNIST('./data', train=False, download=True, transform=transforms.Compose([transforms.ToTensor(),
+                                                                                 binary_transform()])),
         batch_size=args.batch_size, shuffle=False)
 
     model     = MVAE(args.n_latents)
@@ -211,8 +226,9 @@ if __name__ == "__main__":
             text_loss  = elbo_loss(None, None, recon_text_3, text, mu_3, logvar_3, 
                                    lambda_image=args.lambda_image, lambda_text=args.lambda_text,
                                   annealing_factor=annealing_factor)
+            # print(joint_loss, image_loss, text_loss)
             train_loss = joint_loss + image_loss + text_loss
-            train_loss_meter.update(train_loss.data[0], batch_size)
+            train_loss_meter.update(train_loss.item(), batch_size)
             
             # compute gradients and take step
             train_loss.backward()
@@ -247,13 +263,13 @@ if __name__ == "__main__":
             image_loss = elbo_loss(recon_image_2, image, None, None, mu_2, logvar_2)
             text_loss  = elbo_loss(None, None, recon_text_3, text, mu_3, logvar_3)
             test_loss  = joint_loss + image_loss + text_loss
-            test_loss_meter.update(test_loss.data[0], batch_size)
+            test_loss_meter.update(test_loss.item(), batch_size)
 
         print('====> Test Loss: {:.4f}'.format(test_loss_meter.avg))
         return test_loss_meter.avg
 
     
-    best_loss = sys.maxint
+    best_loss = 1e12
     for epoch in range(1, args.epochs + 1):
         train(epoch)
         test_loss = test(epoch)
